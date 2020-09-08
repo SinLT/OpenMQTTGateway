@@ -39,6 +39,7 @@
  * - mqtt_pass
  * - mqtt_server
  * - mqtt_port
+ * - loc_code
  * 
  * To completely disable WifiManager, define ESPWifiManualSetup.
  * If you do so, please don't forget to set these variables before compiling
@@ -111,6 +112,7 @@ char mqtt_server[parameters_size] = "10.0.0.23";
 char mqtt_port[6] = "1883";
 char mqtt_topic[mqtt_topic_max_size] = Base_Topic;
 char gateway_name[parameters_size * 2] = Gateway_Name;
+char loc_code[parameters_size] = "1413";
 
 #if defined(ESP8266) || defined(ESP32)
 #  define ATTEMPTS_BEFORE_BG 10 // Number of wifi connection attempts before going to BG protocol
@@ -253,7 +255,7 @@ uint8_t wifiProtocol = 0; // default mode, automatic selection
 #ifdef ESP8266
 //#  define TRIGGER_GPIO 14 // pin D5 as full reset button (long press >10s)
 #elif ESP32
-//#  define TRIGGER_GPIO 0 // boot button as full reset button (long press >10s)
+#  define TRIGGER_GPIO 33 // boot button as full reset button (long press >10s)
 #endif
 
 //      VCC   ------------D|-----------/\/\/\/\ -----------------  Arduino PIN

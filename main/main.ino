@@ -44,6 +44,7 @@ unsigned long ReceivedSignal[array_size][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
 #include <ArduinoLog.h>
 #include <PubSubClient.h>
 #include "driver/gpio.h"
+#include "uuid.h"
 
 // Modules config inclusion
 #if defined(ZgatewayRF) || defined(ZgatewayRF2) || defined(ZgatewayPilight)
@@ -129,6 +130,8 @@ int failure_number_mqtt = 0; // number of failure connecting to MQTT
 int sosValue = 0;
 int isSos = 0;
 static bool eth_connected = false;
+uuid_t uu, uu2;
+char uu_str[UUID_STR_LEN];
 
 void WiFiEvent(WiFiEvent_t event)
 {
@@ -434,24 +437,29 @@ bool cmpToMainTopic(char* topicOri, char* toAdd) {
 }
 
 void connectMQTT() {
-#ifndef ESPWifiManualSetup
-#  if defined(ESP8266) || defined(ESP32)
+  Log.notice(F("connectMQTT  checkButton" CR));
   checkButton(); // check if a reset of wifi/mqtt settings is asked
-#  endif
-#endif
 
   Log.warning(F("MQTT connection..." CR));
   char topic[mqtt_topic_max_size];
   strcpy(topic, mqtt_topic);
   strcat(topic, will_Topic);
   client.setBufferSize(mqtt_max_packet_size);
-  if (client.connect(gateway_name, mqtt_user, mqtt_pass, topic, will_QoS, will_Retain, will_Message)) {
+  uuid_generate(uu);
+  uuid_unparse(uu, uu_str);
+  if (client.connect(uu_str, mqtt_user, mqtt_pass, topic, will_QoS, will_Retain, will_Message)) {
 #if defined(ZboardM5STICKC) || defined(ZboardM5STACK)
     if (low_power_mode < 2)
       M5Display("MQTT connected", "", "");
 #endif
     Log.notice(F("Connected to broker" CR));
     failure_number_mqtt = 0;
+    char ims_group[mqtt_topic_max_size];
+    strcpy(ims_group, "app/ims/group/");
+    strcat(ims_group, loc_code);
+    if (client.subscribe(ims_group, 1)) {
+      Log.notice(F("%s success" CR), ims_group);
+    }
   } else {
     failure_number_mqtt++; // we count the failure
     Log.warning(F("failure_number_mqtt: %d" CR), failure_number_mqtt);
@@ -506,11 +514,16 @@ void setup() {
   //Launch serial for debugging purposes
   Serial.begin(SERIAL_BAUD);
   Log.begin(LOG_LEVEL, &Serial);
-  Log.notice(F(CR "************* WELCOME TO OpenMQTTGateway1 **************" CR));
+  Log.notice(F(CR "************* WELCOME TO OpenMQTTGateway **************" CR));
+
+  Serial1.begin(115200, SERIAL_8N1, 5, 17);
+
+  byte message[] = {0xFE, 0x01, 0x01, 0xFF};
+  Serial1.write(message, sizeof(message));
 
   setup_gpio();
-  WiFi.onEvent(WiFiEvent);
-  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE);
+//  WiFi.onEvent(WiFiEvent);
+//  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE);
 #if defined(ESP8266) || defined(ESP32)
 #  ifdef ESP8266
 #    ifndef ZgatewaySRFB // if we are not in sonoff rf bridge case we apply the ESP8266 GPIO optimization
@@ -569,7 +582,7 @@ void setup() {
   Log.trace(F("Mqtt server connection by host name: %s" CR), mqtt_server_ip.toString());
 #  else // if not by its IP adress
   client.setServer(mqtt_server, port);
-  Log.trace(F("Mqtt server connection by IP: %s" CR), mqtt_server);
+  Log.notice(F(CR "Mqtt server connection by IP: %s" CR), mqtt_server);
 #  endif
 #endif
 
@@ -831,7 +844,6 @@ void saveConfigCallback() {
   shouldSaveConfig = true;
 }
 
-#  if TRIGGER_GPIO
 void checkButton() { // code from tzapu/wifimanager examples
   // check for button press
   if (digitalRead(TRIGGER_GPIO) == LOW) {
@@ -849,9 +861,6 @@ void checkButton() { // code from tzapu/wifimanager examples
     }
   }
 }
-#  else
-void checkButton() {}
-#  endif
 
 void eraseAndRestart() {
 #  if defined(ESP8266)
@@ -872,9 +881,8 @@ void eraseAndRestart() {
 }
 
 void setup_wifimanager(bool reset_settings) {
-#  if TRIGGER_GPIO
+  Log.notice(F("TRIGGER_GPIO 1 %d" CR), TRIGGER_GPIO);
   pinMode(TRIGGER_GPIO, INPUT_PULLUP);
-#  endif
   delay(10);
   WiFi.mode(WIFI_STA);
   if (wifiProtocol) forceWifiProtocol();
@@ -920,6 +928,8 @@ void setup_wifimanager(bool reset_settings) {
           strcpy(mqtt_topic, json["mqtt_topic"]);
         if (json.containsKey("gateway_name"))
           strcpy(gateway_name, json["gateway_name"]);
+        if (json.containsKey("loc_code"))
+          strcpy(gateway_name, json["loc_code"]);
       } else {
         Log.warning(F("failed to load json config" CR));
       }
@@ -935,6 +945,7 @@ void setup_wifimanager(bool reset_settings) {
   WiFiManagerParameter custom_mqtt_pass("pass", "mqtt pass", mqtt_pass, parameters_size);
   WiFiManagerParameter custom_mqtt_topic("topic", "mqtt base topic", mqtt_topic, mqtt_topic_max_size);
   WiFiManagerParameter custom_gateway_name("name", "gateway name", gateway_name, parameters_size * 2);
+  WiFiManagerParameter custom_loc_code("locCode", "loc code", loc_code, parameters_size);
 
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
@@ -962,6 +973,7 @@ void setup_wifimanager(bool reset_settings) {
   wifiManager.addParameter(&custom_mqtt_pass);
   wifiManager.addParameter(&custom_gateway_name);
   wifiManager.addParameter(&custom_mqtt_topic);
+  wifiManager.addParameter(&custom_loc_code);
 
   //set minimum quality of signal so it ignores AP's under that quality
   wifiManager.setMinimumSignalQuality(MinimumWifiSignalQuality);
@@ -1009,6 +1021,7 @@ void setup_wifimanager(bool reset_settings) {
   strcpy(mqtt_pass, custom_mqtt_pass.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(gateway_name, custom_gateway_name.getValue());
+  strcpy(loc_code, custom_loc_code.getValue());
 
   //save the custom parameters to FS
   if (shouldSaveConfig) {
@@ -1021,6 +1034,7 @@ void setup_wifimanager(bool reset_settings) {
     json["mqtt_pass"] = mqtt_pass;
     json["mqtt_topic"] = mqtt_topic;
     json["gateway_name"] = gateway_name;
+    json["loc_code"] = loc_code;
 
     File configFile = SPIFFS.open("/config.json", "w");
     if (!configFile) {
@@ -1083,23 +1097,25 @@ void loop() {
   sosValue = gpio_get_level(key_toilet);
   if (sosValue == 0) {
     if (isSos != 1) {
-      
+      if (client.connected()) {
+        Serial.println("1");
+      }
     }
   }
-#ifndef ESPWifiManualSetup
-#  if defined(ESP8266) || defined(ESP32)
   checkButton(); // check if a reset of wifi/mqtt settings is asked
-#  endif
-#endif
-
+  
   digitalWrite(led_receive, LOW);
   digitalWrite(led_info, LOW);
   digitalWrite(led_send, LOW);
+  while (Serial1.available()) {
+//    Serial.print("read: ");
+//    Serial.println((uint16_t)Serial1.read());
+  }
 
   unsigned long now = millis();
 
 #if defined(ESP8266) || defined(ESP32)
-  if (WiFi.status() == WL_CONNECTED) {
+  if (eth_connected || WiFi.status() == WL_CONNECTED) {
     ArduinoOTA.handle();
 #else
   if ((Ethernet.hardwareStatus() != EthernetW5100 && Ethernet.linkStatus() == LinkON) || (Ethernet.hardwareStatus() == EthernetW5100)) { //we are able to detect disconnection only on w5200 and w5500
